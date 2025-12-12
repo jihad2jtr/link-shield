@@ -1,0 +1,320 @@
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { links, ads } from '@/lib/api';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ReportLinkButton } from '@/components/ReportLinkButton';
+import { GoogleAdSense } from '@/components/GoogleAdSense';
+import { ExternalLink, AlertTriangle, Clock, Eye } from 'lucide-react';
+
+interface Advertisement {
+  id: string;
+  title: string;
+  description: string | null;
+  image_url: string;
+  target_url: string | null;
+}
+
+export const RedirectPage = () => {
+  const { shortCode } = useParams();
+  const [error, setError] = useState<string | null>(null);
+  const [linkData, setLinkData] = useState<any>(null);
+  const [countdown, setCountdown] = useState(5);
+  const [showAd, setShowAd] = useState(false);
+  const [adViewed, setAdViewed] = useState(false);
+  const [isDirectRedirect, setIsDirectRedirect] = useState(false);
+  const [advertisement, setAdvertisement] = useState<Advertisement | null>(null);
+
+  const fetchRandomAdvertisement = async () => {
+    try {
+      const { data, error } = await ads.getRandom();
+
+      if (error) {
+        console.error('Error fetching advertisements:', error);
+        return null;
+      }
+
+      if (data && data.length > 0) {
+        // API returns random ad in array
+        return data[0];
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error in fetchRandomAdvertisement:', error);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const handleRedirect = async () => {
+      if (!shortCode) {
+        setError('رمز الرابط غير صالح');
+        return;
+      }
+
+      try {
+        // البحث عن الرابط المختصر
+        const { data: linkInfo, error: linkError } = await links.getByCode(shortCode);
+
+        if (linkError || !linkInfo) {
+          setError('الرابط غير موجود أو انتهت صلاحيته');
+          return;
+        }
+
+        // التحقق من حالة الرابط
+        if (linkInfo.status !== 'active') {
+          setError('هذا الرابط غير متاح حالياً');
+          return;
+        }
+
+        setLinkData(linkInfo);
+
+        // تحديث عدد النقرات
+        await links.incrementClicks(linkInfo._id || linkInfo.id);
+
+        // تحديد نوع إعادة التوجيه
+        const redirectType = linkInfo.redirect_type || 'direct';
+
+        if (redirectType === 'direct') {
+          // التوجه المباشر فوراً دون إظهار أي صفحة
+          setIsDirectRedirect(true);
+          window.location.href = linkInfo.original_url;
+          return;
+        } else if (redirectType === 'timer') {
+          // انتظار 5 ثواني
+          const timer = setInterval(() => {
+            setCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(timer);
+                window.location.href = linkInfo.original_url;
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        } else if (redirectType === 'ad') {
+          // إظهار صفحة الإعلانات مع جلب إعلان عشوائي
+          const randomAd = await fetchRandomAdvertisement();
+          setAdvertisement(randomAd);
+          setShowAd(true);
+        }
+
+      } catch (error) {
+        console.error('Error redirecting:', error);
+        setError('حدث خطأ أثناء التوجيه');
+      }
+    };
+
+    handleRedirect();
+  }, [shortCode]);
+
+  const handleSkipAd = () => {
+    if (linkData) {
+      window.location.href = linkData.original_url;
+    }
+  };
+
+  const handleAdViewed = () => {
+    setAdViewed(true);
+    setTimeout(() => {
+      if (linkData) {
+        window.location.href = linkData.original_url;
+      }
+    }, 1000);
+  };
+
+  const handleAdClick = () => {
+    if (advertisement?.target_url) {
+      window.open(advertisement.target_url, '_blank');
+    }
+  };
+
+  // في حالة التوجيه المباشر، لا نعرض شيء
+  if (isDirectRedirect) {
+    return null;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
+            </div>
+            <CardTitle className="text-xl font-bold text-gray-900">خطأ في الرابط</CardTitle>
+            <CardDescription>{error}</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <Button
+              onClick={() => window.location.href = '/'}
+              className="w-full"
+            >
+              العودة إلى الصفحة الرئيسية
+            </Button>
+            {shortCode && (
+              <ReportLinkButton shortCode={shortCode} />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // صفحة انتظار 5 ثواني
+  if (linkData && linkData.redirect_type === 'timer') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl space-y-4">
+          {/* Google AdSense - Top */}
+          <div className="w-full">
+            <GoogleAdSense
+              client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+              slot={import.meta.env.VITE_ADSENSE_TIMER_SLOT || ''}
+            />
+          </div>
+
+          <Card className="max-w-md mx-auto">
+            <CardHeader className="text-center">
+              <div className="mx-auto mb-4 w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                <Clock className="h-8 w-8 text-blue-600" />
+              </div>
+              <CardTitle className="text-xl font-bold text-gray-900">إعادة التوجيه</CardTitle>
+              <CardDescription>
+                {linkData.title || 'سيتم توجيهك إلى الرابط المطلوب'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <div className="text-4xl font-bold text-blue-600">{countdown}</div>
+              <p className="text-gray-600">ثانية متبقية</p>
+
+              {/* Google AdSense - Middle */}
+              <div className="my-4">
+                <GoogleAdSense
+                  client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+                  slot={import.meta.env.VITE_ADSENSE_TIMER_SLOT || ''}
+                />
+              </div>
+
+              <Button
+                onClick={() => window.location.href = linkData.original_url}
+                variant="outline"
+                className="w-full"
+              >
+                انتقال فوري
+              </Button>
+              <ReportLinkButton shortCode={shortCode!} />
+            </CardContent>
+          </Card>
+
+          {/* Google AdSense - Bottom */}
+          <div className="w-full">
+            <GoogleAdSense
+              client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+              slot={import.meta.env.VITE_ADSENSE_TIMER_SLOT || ''}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // صفحة الإعلانات
+  if (showAd && linkData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl space-y-4">
+          {/* Google AdSense - Top Banner */}
+          <div className="w-full">
+            <GoogleAdSense
+              client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+              slot={import.meta.env.VITE_ADSENSE_AD_SLOT || ''}
+            />
+          </div>
+
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader className="text-center">
+              <CardTitle className="text-xl font-bold text-gray-900">إعلان</CardTitle>
+              <CardDescription>مشاهدة الإعلان تدعم الموقع</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* إعلان المستخدم */}
+              {advertisement ? (
+                <div
+                  className="bg-white border-2 border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:shadow-lg transition-shadow"
+                  onClick={handleAdClick}
+                >
+                  <img
+                    src={advertisement.image_url}
+                    alt={advertisement.title}
+                    className="w-full h-48 object-cover rounded-lg mb-4"
+                  />
+                  <h3 className="text-xl font-bold mb-2">{advertisement.title}</h3>
+                  {advertisement.description && (
+                    <p className="text-gray-600 mb-4">{advertisement.description}</p>
+                  )}
+                  {advertisement.target_url && (
+                    <p className="text-sm text-blue-600">انقر للمزيد ←</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-8 rounded-lg text-center">
+                  <Eye className="h-16 w-16 mx-auto mb-4" />
+                  <h3 className="text-2xl font-bold mb-2">إعلان تجريبي</h3>
+                  <p className="text-lg opacity-90">شكراً لك على دعم موقعنا!</p>
+                  <p className="text-sm mt-4 opacity-75">هذا إعلان تجريبي - يمكن استبداله بإعلانات حقيقية</p>
+                </div>
+              )}
+
+              {/* Google AdSense - Middle */}
+              <div className="my-6">
+                <GoogleAdSense
+                  client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+                  slot={import.meta.env.VITE_ADSENSE_AD_SLOT || ''}
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  onClick={handleSkipAd}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  تخطي الإعلان
+                </Button>
+                <Button
+                  onClick={handleAdViewed}
+                  className="flex-1"
+                  disabled={adViewed}
+                >
+                  {adViewed ? 'جاري التوجيه...' : 'شاهدت الإعلان - متابعة'}
+                </Button>
+              </div>
+
+              <div className="text-center">
+                <ReportLinkButton shortCode={shortCode!} />
+              </div>
+
+              {linkData.title && (
+                <p className="text-center text-gray-600 text-sm">
+                  الوجهة: {linkData.title}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Google AdSense - Bottom Banner */}
+          <div className="w-full">
+            <GoogleAdSense
+              client={import.meta.env.VITE_ADSENSE_CLIENT_ID || ''}
+              slot={import.meta.env.VITE_ADSENSE_AD_SLOT || ''}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
